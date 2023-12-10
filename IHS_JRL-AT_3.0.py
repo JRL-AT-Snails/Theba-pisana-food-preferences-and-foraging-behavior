@@ -2,13 +2,11 @@
 """
 Spyder Editor
 
-This is a temporary script file.
 """
 #!/usr/bin/env python3
 
-# Author(s): T. Flutre - M. Ecarnot
-# to be shared only with members of the PerfoMix project
-
+# Author(s): T. Flutre - M. Ecarnot - A. Patouillard - A. Hardy - C. Lee - R. Roux-Vaneph
+# 
 # References:
 # http://www.plantphysiol.org/lookup/doi/10.1104/pp.112.205120
 # https://codegolf.stackexchange.com/questions/40831/counting-grains-of-rice
@@ -90,7 +88,7 @@ opening2 = cv.morphologyEx(binaryImage, cv.MORPH_OPEN, np.ones((4, 7), np.uint8)
 plt.figure()
 plt.imshow(opening2)
 
-#Boucle sur toutes les imagettes
+#Loop on every sample image 
 
  #sp = np.empty((0,img.shape[2])).astype(np.int16)
 n=1
@@ -121,33 +119,5 @@ for y in range (5): #parcours les 5 lignes de notre image
         np.savetxt(csv_file_path, sp1m, delimiter=',', header='Reflectance', comments='')
         n+=1
 
-#read spectral data finally obtained 
-#sp = np.concatenate((sp, sp1),axis=0)
-#binaryImage = cv.morphologyEx(binaryImage, cv.MORPH_CLOSE, np.ones((10,10),np.uint8))
-
-        # labeled_array = label(binaryImage)
-        # regions = regionprops(labeled_array)
-        # plt.imshow(labeled_array)
-        #
-        # o = [x for x in regions if x.area >= areaRange and x.solidity > 0.9]
-        #
-        # # Save spectra and morph into file
-        # attrok = ('area','bbox_area','convex_area','eccentricity','equivalent_diameter','euler_number','extent','feret_diameter_max','filled_area','label','major_axis_length','minor_axis_length','orientation','perimeter','perimeter_crofton','solidity')
-        # sp = np.empty((0,img.shape[2]+3)).astype(np.int16)  # np.empty((len(o),img.shape[2]))
-        # morph = np.empty((len(o),len(attrok)))
-        # imredu = img[:, colmin:colmax, :]
-        # dep = np.reshape(imredu,(imredu.shape[0]*imredu.shape[1],imredu.shape[2]))
-        #
-        # for i in range(0,len(o)) :
-        #     id = np.ravel_multi_index(np.transpose(o[i].coords), (imredu.shape[0],imredu.shape[1]))  # coord of grains pixels in unfolded image
-        #     sp1 = np.array([dep[j,:] for j in id]).astype(np.int16)
-        #     #sp1 = np.array([dep[j,:] for j in id])
-        #     spcoord=np.concatenate((mb.repmat(i+1,len(id),1),o[i].coords,sp1),axis=1).astype(np.int16)
-        #     sp = np.concatenate((sp, spcoord))
-        #
-        #     for j in range(0,len(attrok)) :
-        #         morph[i, j] = getattr(o[i], attrok[j])
-
-        # Save Spectra
     
 
