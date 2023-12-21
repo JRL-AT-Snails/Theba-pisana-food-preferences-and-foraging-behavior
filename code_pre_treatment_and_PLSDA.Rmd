@@ -1,0 +1,513 @@
+---
+title: |
+ ![](C:\Users\Utilisateur\Snails_Project\Temoins){width=2in} third pre-treatment with Savitzky Golay rchemo and PLSDA
+author: "Cing Lee, Romeo Roux-Vaneph, Adele Hardy, Aubin Patouillard"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+  pdf_document:
+    toc: yes
+    number_sections: yes
+---
+******
+
+GOAL : **third pre-treatment with Savitzky Golay rchemo and PLSDA**
+
+*****
+
+
+```{r project_organization}
+project.dir <- "C:/Users/Utilisateur/Snails_Project"
+data.dir <- paste0(project.dir, "/Temoins")
+doc.dir <- paste0(project.dir,"/Code_Pre_traitement")
+```
+
+```{r setup}
+knitr::opts_chunk$set(fig.path=project.dir, 
+                      echo = TRUE, 
+                      message=FALSE, 
+                      warning=FALSE)
+```
+
+# Recommanded R packages
+
+```{r libraries}
+
+#----------Importation and data management
+  library("tidyverse") # data management
+  library("readxl")
+#-----------------------------------------------------
+
+#----------Visualization and pre-treatment for functional data
+  library("hyperSpec") # Spectral data management
+  library("prospectr") # Spectral data pre-treatment
+  library("rchemo")    # all inclusive
+  library(fda.usc)   # functional data management
+#-----------------------------------------------------
+
+#---------- Machine Learning
+  library("randomForest")# randomForest
+  library("MLmetrics")  # Multiclasssummary for caret.
+  library("caret")       # machine learning
+#-----------------------------------------------------
+#---------- Other tools for visualization
+  library(MASS)       # basic statistics
+  library(gridExtra)  # combining ggplot graphics
+  library(cowplot)    # combining ggplot graphics
+```
+
+# Data Inspection
+
+## Data importation
+
+```{r importation}
+  spectra <- read.table(paste(data.dir,"spectra.csv",sep="/"), sep=",", h=T, row=1)
+  class <- read.table(paste(data.dir,"classes.csv",sep="/"), sep=",", h=T, row=1 )
+```
+
+## Creation of a vector of the wavelength values
+
+```{r wave}
+# Creation of a vector of wavelength values
+wavelength.vector <- as.numeric(gsub(pattern="X", 
+                                     replacement="",
+                                     x=colnames(spectra)[1:216]))
+
+# Convertir les noms de colonnes en valeurs numériques
+new_column_names <- as.numeric(gsub(pattern = "X", replacement = "", x = colnames(spectra)[1:216]))
+
+# Changer les noms de colonnes dans l'objet spectra
+colnames(spectra)[1:216] <- new_column_names
+```
+
+
+# Data representation
+
+## Groups or classes
+
+```{r group}
+spectra_class = spectra %>%
+  mutate (group = as.factor(class$num_class))%>%
+  mutate (size = as.factor(class$Size))
+spectra_class=spectra_class[complete.cases(spectra_class),]
+#on créer une matrice spectra_class avec les spectres plus les informations sur la diet en dernière colonne et on en retire les lignes sans informations.
+```
+
+## Graphic of the spectral dataa
+
+```{r graprchemo, fig.width=12, fig.eight=4}
+# From package rchemo
+
+plotsp(spectra_class[,1:216], 
+       col = ifelse(spectra_class$group == 2 ,"green","brown"),
+       main = ("Datas from python script"),
+      xlab="",ylab="Reflectance")
+
+# Filter rows where spectra_class$group == 2
+subset_data_Living <- apply(spectra_class[spectra_class$group == 2,-c(217,218) ], MARGIN = 2, mean)
+# Filter rows where spectra_class$group == 1
+subset_data_Dead <- apply(spectra_class[spectra_class$group == 1,-c(217,218) ], MARGIN = 2, mean)
+
+# Create a matrix with data from subset_data
+subset_data_diet <- matrix(c(subset_data_Living, subset_data_Dead), nrow = 2, byrow = TRUE)
+# Name the columns with the same names as spectra
+colnames(subset_data_diet) <- colnames(spectra)
+# Name the rows with the names of the subset_data
+rownames(subset_data_diet) <- c("Living", "Dead")
+
+# Plot the subset of data using plotsp
+plotsp(subset_data_diet, lwd = 2,
+       col = c("green","brown"),
+       main = "Mean spectra of faeces from the three sizes of control snails, either fed with only green leaves or decaying ones",
+       xlab = "Wavelengths", ylab = "Reflectance",Legend=TRUE)
+
+# Add legend
+legend("topright", legend = c("Living", "Dead"), col = c("green", "brown"), lty = 1,lwd = 2)
+
+# Filter rows where spectra_class$size == 1
+subset_data_large <- apply(spectra_class[spectra_class$size == 1,-c(217,218) ], MARGIN = 2, mean)
+
+# Filter rows where spectra_class$size == 2
+subset_data_medium <- apply(spectra_class[spectra_class$size == 2,-c(217,218) ], MARGIN = 2, mean)
+
+# Filter rows where spectra_class$size == 3
+subset_data_small <- apply(spectra_class[spectra_class$size == 3,-c(217,218) ], MARGIN = 2, mean)
+
+# Create a matrix with data from subset_data
+subset_data_size <- matrix(c(subset_data_large, subset_data_medium, subset_data_small), nrow = 3, byrow = TRUE)
+
+# Name the columns with the same names as spectra
+colnames(subset_data_size) <- colnames(spectra)
+
+# Name the rows with the names of the subset_data
+rownames(subset_data_size) <- c("Large", "Medium", "Small")
+
+# Calculate the median for each row
+medianReflectance <- apply(subset_data_size, 1, median)
+
+# Plot the subset of data using plotsp
+plotsp(subset_data_size, lwd = 2,
+       col = c("red","violet","orange"),
+       main = "Mean spectra of faeces from control snails with the same shell size",
+       xlab = "Wavelengths", ylab = "Reflectance")
+# Add legend
+legend("topright", legend = c("S1 : Large", "S2 : Medium","S3 : Small"), col = c("red","violet","orange"), lty = 1,lwd = 2)
+```
+
+
+# Pre-treatment of spectral data
+
+## Basic pre-treatment as centering and normalisation from `prospectr` or `rchemo`
+```{r basic, fig.width=12, fig.height=4}
+
+# the standard normal variate transformation (rchemo)
+# ?snv to have a look at the help
+plotsp(snv(spectra_class[,(1:216)]), 
+       col = ifelse(spectra_class$group == 2 ,"green","brown"),
+        main=("SNV transformation"),
+        xlab="",ylab="Spectral data")
+```
+
+## Derivatives from `rchemo`
+
+```{r deriv, fig.width=12, fig.height=4}
+# p = polynomial order 
+# w = window size (must be odd) 
+# m = m-th derivative (0 = smoothing) 
+
+sg.rchemo <- rchemo::savgol(spectra_class[,(1:216)], p = 2, n = 5, m = 1)
+
+plotsp(sg.rchemo, 
+       col = ifelse(spectra_class$group == 2 ,"green","brown"),
+       main = "Savitzky Golay rchemo",
+       xlab="",ylab="Spectral data")
+par(mfrow = c(1, 1))
+```
+
+#Save
+
+```{r}
+save_path <- paste0(data.dir,"/spectra_correction.csv")
+matable <- sg.rchemo %>%
+  as.data.frame()%>% 
+  mutate(group=spectra_class$group)%>% 
+  mutate (size = spectra_class$size)
+write.csv(matable, save_path)
+```
+
+## Data Importation and Management
+
+
+## PLS-DA
+The usual tool for spectral data is PLS, here in the Discriminant Analysis version to perform supervised classification. In this use case, we used the R package **mixOmics** from the **Bioconductor** platform instead of the **CRAN** platform. To install this package on your computer, do the following steps:
+
+```{r installmixO,echo=TRUE,eval=FALSE,message=FALSE, warning=FALSE}
+  if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+  BiocManager::install("mixOmics")  
+```
+
+```{r libmixO}
+  library(mixOmics) # PLS derived methods for Omics Data
+```
+
+### learning from the training datasets of Ixos and Primadur
+
+
+**Step 1 : Partition of the dataset `sp` into calibration and validation subsets**
+
+```{r sampling}
+  # Sampling
+  size = round(nrow(matable)/3)
+  id_val=sample(1:nrow(matable))[1:size]
+
+  # Calibration and validation datasets
+  matable_val=matable[id_val,-c(217,218)]; matable_cal=matable[-id_val,-c(217,218)]
+  variety_val= matable$group[id_val]; variety_cal=matable$group[-id_val]
+```
+
+**Step 2 : Calibration by hand**
+Run PLSDA with different parameter (`ncomp`) values to calibrate the  number of components of the PLSDA.
+
+```{r calibplsda}
+  ## PLSDA
+# Initialization
+  ncmax=10 #Fixe le nombre maximal de composantes principales à considérer dans la boucle à 10.
+  perok=vector(mode='numeric',length=ncmax) # Initialise un vecteur perok pour stocker les performances du modèle pour différentes valeurs de composantes principales.
+#
+
+# Loop
+  for (i in 1:ncmax) {
+    # Model Estimation
+    rplsda=plsda(matable_cal, variety_cal,ncomp=i)
+    # Model performance
+    pred=predict(rplsda ,matable_val)
+    # Contingency table for 
+    t=table(as.factor(pred$class$mahalanobis.dist[,i]),variety_val)
+    # error rate
+    perok[i]=1-sum(diag(as.matrix(t)))/size
+  }
+# Performance results
+  perok 
+```
+**Step 2bis : Calibration from mixOmics functions**
+
+click on  [mixOmics plsda vignette](https://bioconductor.org/packages/release/bioc/vignettes/mixOmics/inst/doc/vignette.html#pls-da-on-the-srbct-case-study-05)
+
+To set a more robust calibration, the cross-validation is repeated 50 times for each component value between 1 and `ncomp` in the `perf` function. 
+
+```{r plsda,fig.width=12, fig.height=4}
+plsda.res <- plsda(X=matable_cal, Y=variety_cal, ncomp = 5)
+
+perf.plsda.res <- perf(plsda.res, validation = 'Mfold', folds = 5, 
+                  criterion = "all",
+                  progressBar = TRUE,  # Set to TRUE to track progress
+                  nrepeat = 50)         # We suggest nrepeat = 50
+
+plot(perf.plsda.res, sd = TRUE, legend.position = 'horizontal')
+```
+
+```{r perfplsda}
+perf.plsda.res$choice.ncomp
+
+# max.dist : distance maximale entre les moyennes des classes
+# centroids.dist : distance entre les centroïdes des classes. Les centroïdes sont les moyennes des observations appartenant à chaque classe
+# mahalanobis.dist : mesure de la distance entre un point et un ensemble de points, en tenant compte de la covariance entre les variables
+```
+
+**Estimation of the model**
+```{r plsdafinal}
+# Estimation of the model from the whole training dataset
+# using perf.plsda.res$choice.ncomp for Mahalanobis distance
+  rplsda_final=plsda(matable_cal, variety_cal, ncomp=5)
+# Performance
+  perf.plsda.final <- perf(rplsda_final, validation = 'Mfold', folds = 5, 
+                  criterion = "all",
+                  progressBar = TRUE,  # Set to TRUE to track progress
+                  nrepeat = 50)         # We suggest nrepeat = 50
+  
+ # Calcul de la moyenne le long de l'axe 2 pour obtenir une matrice 2D
+perf.plsda.final_class_mahalanobis.dist_numeric <- apply(perf.plsda.final$class$mahalanobis.dist, c(1, 3), as.numeric)
+perf.plsda.final_class_mahalanobis.dist_2D_moyenne <- apply(perf.plsda.final_class_mahalanobis.dist_numeric, c(2, 3), mean)
+  perf.plsda.final_class_mahalanobis.dist_2D_moyenne <- round(perf.plsda.final_class_mahalanobis.dist_2D_moyenne)
+perf.plsda.final_class_mahalanobis.dist_2D_moyenne <- as.factor(perf.plsda.final_class_mahalanobis.dist_2D_moyenne[,1])
+
+conf_matrix <- confusionMatrix(perf.plsda.final_class_mahalanobis.dist_2D_moyenne, reference = variety_cal)
+
+# Afficher la matrice de confusion
+print(conf_matrix)
+
+# Afficher l'accuracy
+accuracy <- conf_matrix$overall["Accuracy"]
+cat("Accuracy:", accuracy, "\n")
+
+```
+
+
+**Loadings**
+```{r loading,fig.width=12, fig.height=4}
+rplsda_final
+#plotLoadings(rplsda_final,comp=1)
+plot(colnames(sg.rchemo), rplsda_final$loadings$X[,1],
+     type="l",lty=1, 
+     xlab="Wavelength",
+     ylab="Loadings", 
+     main="1st component")
+abline(h=0,col="red", lty=2)
+plot(colnames(sg.rchemo), rplsda_final$loadings$X[,2],
+     type="l",lty=1, 
+     xlab="Wavelength",
+     ylab="Loadings", 
+     main="2nd component")
+abline(h=0,col="red", lty=2)
+plot(colnames(sg.rchemo), rplsda_final$loadings$X[,3],
+     type="l",lty=1, 
+     xlab="Wavelength",
+     ylab="Loadings", 
+     main="3rd component")
+abline(h=0,col="red", lty=2)
+```
+
+```{r,fig.width=11}
+vip_scores <- rplsda_final$loadings$X
+
+# Get loadings
+loadings_matrix <- rplsda_final$loadings$X
+
+# Calculate the mean of loadings for each variable
+mean_loadings <- rowMeans(loadings_matrix)
+
+# Extract VIP scores for all components
+for (i in 1:3) {
+  vip_scores_componenti <- vip_scores[, i]
+  
+  # Calculate the mean of loadings for the current component
+  mean_loading <- mean(vip_scores_componenti)
+  # Select wavelengths with loadings above the mean
+  selected_wavelengths <- names(vip_scores_componenti[vip_scores_componenti > mean_loading])
+
+  ## Optionally, plot VIP scores for visualization
+
+  # Calculate the difference from the mean to adjust the position of the   bars
+  difference_from_mean <- vip_scores_componenti - mean_loading
+  
+  # Extract the response variable (e.g., group)
+  response_variable <- matable$group
+  # Store results
+  results <- data.frame(Wavelength = character(), P_Value = numeric(), stringsAsFactors = FALSE)
+    for (wavelength in selected_wavelengths) {
+      predictor_variable <- matable[, wavelength]
+    
+    # Perform ANOVA
+      anova_result <- aov(predictor_variable ~ response_variable)
+    
+    # Extract relevant information from ANOVA result (e.g., p-value)
+      p_value <- summary(anova_result)[[1]]$`Pr(>F)`[1]
+    
+    # Store the results
+      results <- rbind(results, data.frame(Wavelength = wavelength, P_Value = p_value))
+    
+    # Print or store the results as needed
+    cat("Wavelength:", wavelength, " | P-Value:", p_value, "\n")
+  }
+  # Filter the results based on p-value
+  significant_results <- results[results$P_Value < 0.05, ]
+  
+# Optionally, plot barplot with significant wavelengths in red
+  barplot(difference_from_mean,
+          col = ifelse(colnames(matable) %in% significant_results[,1], "red", "blue"),
+          main = paste("ANOVA p_value for Component",i),
+          xlab = "Wavelengths",
+          ylab = "VIP Scores",
+          ylim = c(min(difference_from_mean), max(difference_from_mean)),
+          # Set ylim based on the range of adjusted VIP scores
+    )
+}
+
+vip_scores <- rplsda_final$loadings$X
+
+# Get loadings
+loadings_matrix <- rplsda_final$loadings$X
+
+# Calculate the mean of loadings for each variable
+mean_loadings <- rowMeans(loadings_matrix)
+
+# Initialisation d'une liste pour stocker les résultats de chaque composant
+all_results <- list()
+
+# Extract VIP scores for all components
+for (i in 1:3) {
+  vip_scores_componenti <- vip_scores[, i]
+  
+  # Calculate the mean of loadings for the current component
+  mean_loading <- mean(vip_scores_componenti)
+  
+  # Select wavelengths with loadings above the mean
+  selected_wavelengths <- names(vip_scores_componenti[vip_scores_componenti > mean_loading])
+
+  # Calculate the difference from the mean to adjust the position of the bars
+  difference_from_mean <- vip_scores_componenti - mean_loading
+  
+  # Extract the response variable (e.g., group)
+  response_variable <- matable$group
+  
+  # Initialisation d'un data frame pour stocker les résultats du composant actuel
+  results <- data.frame(Wavelength = character(), P_Value = numeric(), stringsAsFactors = FALSE)
+  
+  for (wavelength in selected_wavelengths) {
+    predictor_variable <- matable[, wavelength]
+    
+    # Perform ANOVA
+    anova_result <- aov(predictor_variable ~ response_variable)
+    
+    # Extract relevant information from ANOVA result (e.g., p-value)
+    p_value <- summary(anova_result)[[1]]$`Pr(>F)`[1]
+    
+    # Store the results
+    results <- rbind(results, data.frame(Wavelength = wavelength, P_Value = p_value))
+    
+    # Print or store the results as needed
+    cat("Wavelength:", wavelength, " | P-Value:", p_value, "\n")
+  }
+  
+  # Filter the results based on p-value
+  significant_results <- results[results$P_Value < 0.05, ]
+  
+  # Stocker les résultats dans la liste
+  all_results[[paste("Component", i)]] <- significant_results
+}
+
+# Combinez les résultats dans une matrice
+final_matrix <- do.call(rbind, all_results)
+
+# Afficher la matrice finale
+save_path <- paste0(data.dir,"/significant_results.csv")
+write.csv(final_matrix,save_path)
+
+```
+
+**Explained Variance percentages** (amount of variance explained per component (note that contrary to PCA, this amount may not decrease as the aim of the method is not to maximize the variance, but the covariance between X and the dummy matrix Y).
+
+```{r percvar}
+lapply(rplsda_final$prop_expl_var,round,2)
+```
+
+```{r plotindiv,fig.width=12, fig.height=4}
+# Identify common indices between matable_cal and matable
+common_indices <- intersect(rownames(matable_cal), rownames(matable))
+
+# Add the column to matable_cal
+matable_cal_group_size <- cbind(matable_cal, group= matable[common_indices, 217],size = matable[common_indices,218])
+plotIndiv(rplsda_final,comp=c(1,3),ellipse = TRUE,
+          group = rplsda_final$Y,pch=as.numeric(matable_cal_group_size[,218]),
+          pch.levels= ifelse(matable_cal_group_size[,218]==1,"large",ifelse(matable_cal_group_size[,218]==2,"medium","small")) ,legend=TRUE,col=c("brown","green"))
+
+
+```
+
+
+### Variety identification in the mixture dataset
+```{r predplsda, fig.width=12, fig.height=4}
+matrix_wild <- read.table(paste(project.dir,"Sauvages/spectra.csv",sep="/"), sep=",", h=T, row=1) 
+wild_classes <- read.table(paste(project.dir,"Sauvages/classes.csv",sep="/"), sep=",", h=T, row=1) 
+# Creation of a vector of wavelength values
+wavelength.vector <- as.numeric(gsub(pattern="X", 
+                                     replacement="",
+                                     x=colnames(matrix_wild)[1:216]))
+
+# Convertir les noms de colonnes en valeurs numériques
+new_column_names <- as.numeric(gsub(pattern = "X", replacement = "", x = colnames(matrix_wild)[1:216]))
+
+# Changer les noms de colonnes dans l'objet spectra
+colnames(matrix_wild)[1:216] <- new_column_names
+
+#wild groups prediction
+pred_wild=predict(rplsda_final,matrix_wild)
+
+# Assuming you want the coordinates for components 1 and 2
+predicted_coordinates <- predict(rplsda_final, newdata = matrix_wild, comp = c(1, 2))
+
+# Now, you can use the predicted_coordinates to plot individuals on a plane
+matrix_wild = matrix_wild %>%
+  mutate (group = as.factor(wild_classes$num_class))%>%
+  mutate (size = as.factor(wild_classes$Size))
+
+save_path <- paste0(data.dir,"/matrix_wild.csv")
+write.csv(matrix_wild,save_path)
+save_path <- paste0(data.dir,"/pred_wild.csv")
+write.csv(pred_wild$variates,save_path)
+save_path <- paste0(data.dir,"/rplsda.final$group_size.csv")
+write.csv(matable_cal_group_size,save_path)
+save_path <- paste0(data.dir,"/rplsda.final$coordonnees.csv")
+write.csv(rplsda_final$variates$X,save_path)
+```
+
+```{r}
+myresu<-cbind.data.frame(pred_matable$class$mahalanobis,as.numeric(matable.rf$aggregate))
+colnames(myresu)<-c(paste0("plsda",seq(1,ncol(pred_matable$class$mahalanobis))),
+                      "RF")
+head(myresu)
+```
